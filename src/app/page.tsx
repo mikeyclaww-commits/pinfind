@@ -500,24 +500,32 @@ export default function Home() {
                   {/* Matches */}
                   <div className="p-3 space-y-2">
                     <p className="text-xs text-gray-400 font-medium uppercase">Shop Similar</p>
-                    {(matches[product.id] || []).slice(0, 4).map((match) => (
+                    {(matches[product.id] || []).slice(0, 6).map((match) => (
                       <a
                         key={match.id}
                         href={match.product_url}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 transition group"
+                        className="flex items-center gap-3 p-2.5 rounded-lg border border-transparent hover:border-red-200 hover:bg-red-50/50 transition group cursor-pointer"
                       >
-                        {match.image_url && (
-                          <img src={match.image_url} alt="" className="w-12 h-12 rounded-lg object-cover bg-gray-100" />
+                        {match.image_url ? (
+                          <img src={match.image_url} alt="" className="w-14 h-14 rounded-lg object-cover bg-gray-100 flex-shrink-0" />
+                        ) : (
+                          <div className="w-14 h-14 rounded-lg bg-gray-100 flex items-center justify-center flex-shrink-0">
+                            <ShoppingBag className="h-5 w-5 text-gray-300" />
+                          </div>
                         )}
                         <div className="flex-1 min-w-0">
-                          <p className="text-sm text-gray-900 truncate font-medium">{match.product_name}</p>
-                          <p className="text-xs text-gray-500">{match.retailer}</p>
+                          <p className="text-sm text-gray-900 font-medium line-clamp-2 leading-snug">{match.product_name}</p>
+                          <p className="text-xs text-gray-500 mt-0.5">{match.retailer}</p>
                         </div>
-                        <div className="text-right flex-shrink-0">
-                          <p className="text-sm font-bold text-gray-900">${match.price}</p>
-                          <ExternalLink className="h-3 w-3 text-gray-400 ml-auto opacity-0 group-hover:opacity-100 transition" />
+                        <div className="text-right flex-shrink-0 flex flex-col items-end gap-1">
+                          {match.price > 0 && (
+                            <p className="text-sm font-bold text-gray-900">${match.price.toFixed(2)}</p>
+                          )}
+                          <span className="text-xs text-red-500 font-medium flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                            Shop <ExternalLink className="h-3 w-3" />
+                          </span>
                         </div>
                       </a>
                     ))}

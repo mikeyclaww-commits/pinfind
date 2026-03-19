@@ -1,14 +1,5 @@
 import type { ProductMatch, UserPreferences } from "@/types";
 
-interface SearchResult {
-  title: string;
-  link: string;
-  source: string;
-  price?: string;
-  thumbnail?: string;
-  extracted_price?: number;
-}
-
 export async function searchProducts(
   query: string,
   preferences?: UserPreferences | null
@@ -21,9 +12,6 @@ export async function searchProducts(
     if (preferences.gender_presentation) {
       enhancedQuery = `${preferences.gender_presentation} ${enhancedQuery}`;
     }
-    if (preferences.preferred_brands.length > 0) {
-      // Boost preferred brands
-    }
   }
 
   // Try SerpAPI Google Shopping
@@ -34,6 +22,8 @@ export async function searchProducts(
         engine: "google_shopping",
         q: enhancedQuery,
         num: "8",
+        hl: "en",
+        gl: "us",
       });
 
       // Add price filter based on budget
@@ -46,7 +36,7 @@ export async function searchProducts(
         };
         const range = budgetMap[preferences.budget_range];
         if (range) {
-          params.set("price", range);
+          params.set("tbs", `mr:1,price:1,ppr_min:${range.split(",")[0]},ppr_max:${range.split(",")[1] || ""}`);
         }
       }
 
@@ -54,7 +44,12 @@ export async function searchProducts(
       const data = await res.json();
 
       const results = data.shopping_results || [];
-      for (const r of results.slice(0, 8)) {
+      for (const r of results.slice(0, 6)) {
+        // product_link goes to Google Shopping product page (which has "buy" buttons to retailers)
+        // If no product_link, construct a Google Shopping search URL
+        const productUrl = r.product_link
+          || `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(r.title || query)}`;
+
         matches.push({
           id: `match_${Date.now()}_${Math.random().toString(36).slice(2)}`,
           detected_product_id: "",
@@ -62,10 +57,10 @@ export async function searchProducts(
           brand: r.source || "Unknown",
           price: r.extracted_price || parsePrice(r.price) || 0,
           currency: "USD",
-          product_url: r.link || "",
+          product_url: productUrl,
           image_url: r.thumbnail || "",
           retailer: r.source || "Unknown",
-          similarity_score: 0.85,
+          similarity_score: r.rating ? r.rating / 5 : 0.8,
           in_stock: true,
           size_available: true,
         });
@@ -75,33 +70,31 @@ export async function searchProducts(
     }
   }
 
-  // Fallback: generate mock results for demo
+  // Fallback: direct Google Shopping search links
   if (matches.length === 0) {
-    const mockRetailers = ["Nordstrom", "ASOS", "Zara", "H&M", "Net-a-Porter", "Revolve"];
-    for (let i = 0; i < 4; i++) {
-      const retailer = mockRetailers[i % mockRetailers.length];
-      const basePrice = Math.floor(Math.random() * 150) + 25;
-      matches.push({
-        id: `match_${Date.now()}_${i}`,
-        detected_product_id: "",
-        product_name: `${query} - Similar Style`,
-        brand: retailer,
-        price: basePrice,
-        currency: "USD",
-        product_url: `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(query)}`,
-        image_url: "",
-        retailer,
-        similarity_score: 0.7 - i * 0.1,
-        in_stock: true,
-        size_available: true,
-      });
-    }
+    const googleShopUrl = `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(enhancedQuery)}`;
+    matches.push({
+      id: `match_${Date.now()}_fallback`,
+      detected_product_id: "",
+      product_name: `Search "${query}" on Google Shopping`,
+      brand: "Google Shopping",
+      price: 0,
+      currency: "USD",
+      product_url: googleShopUrl,
+      image_url: "",
+      retailer: "Google Shopping",
+      similarity_score: 0.5,
+      in_stock: true,
+      size_available: true,
+    });
   }
 
   // Filter by preferences
   if (preferences) {
     return matches.filter((m) => {
-      if (preferences.excluded_brands.some((b) => m.brand.toLowerCase().includes(b.toLowerCase()))) {
+      if (preferences.excluded_brands.some((b) =>
+        m.brand.toLowerCase().includes(b.toLowerCase())
+      )) {
         return false;
       }
       return true;
