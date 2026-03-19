@@ -1,68 +1,77 @@
 import { NextResponse } from "next/server";
 
-// Extract the unique image identifier from a pinimg URL
-// e.g., "https://i.pinimg.com/736x/ab/cd/ef/abcdef123.jpg" → "ab/cd/ef/abcdef123.jpg"
+// Extract the unique image path from a pinimg URL (after the size prefix)
 function getImageId(url: string): string {
   const match = url.match(/\/(?:originals|736x|564x|474x|236x|170x|150x150)\/(.+)/);
-  return match ? match[1] : url;
+  return match ? match[1].split("?")[0] : url;
 }
 
 async function scrapePinterestBoard(boardUrl: string) {
   try {
+    // Fetch with headers that get the full server-rendered page
     const res = await fetch(boardUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "text/html,application/xhtml+xml",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Cache-Control": "no-cache",
       },
     });
 
     const html = await res.text();
 
-    // Collect ALL pinimg URLs
+    // Collect ALL pinimg URLs from the HTML
     const allUrls: string[] = [];
-    const imgRegex = /https:\/\/i\.pinimg\.com\/[^\s"'\\]+/g;
-    const matches = html.match(imgRegex) || [];
-    for (const url of matches) {
-      const clean = url.replace(/\\u002F/g, "/").replace(/\\/g, "");
-      allUrls.push(clean);
+
+    // Match all pinimg URLs (handle escaped slashes in JSON)
+    const patterns = [
+      /https?:\/\/i\.pinimg\.com\/[^\s"'\\)>]+/g,
+      /https?:\\u002F\\u002Fi\.pinimg\.com\\u002F[^\s"'\\)>]+/g,
+    ];
+
+    for (const pattern of patterns) {
+      const matches = html.match(pattern) || [];
+      for (const url of matches) {
+        const clean = url
+          .replace(/\\u002F/g, "/")
+          .replace(/\\/g, "")
+          .replace(/['")\]}>]+$/, ""); // Clean trailing chars
+        allUrls.push(clean);
+      }
     }
 
-    // Also extract from JSON data
-    const jsonRegex = /"url":\s*"(https:\/\/i\.pinimg\.com\/[^"]+)"/g;
-    let match;
-    while ((match = jsonRegex.exec(html)) !== null) {
-      const clean = match[1].replace(/\\u002F/g, "/").replace(/\\/g, "");
-      allUrls.push(clean);
-    }
-
-    // Deduplicate by image ID — keep the highest resolution version
+    // Deduplicate by image ID — keep highest resolution
     const imageMap = new Map<string, string>();
-    const sizePriority = ["originals", "736x", "564x", "474x", "236x"];
+    const sizePriority = ["originals", "736x", "564x", "474x"];
 
     for (const url of allUrls) {
-      // Skip tiny images, profile pics, icons
-      if (url.includes("/30x30/") || url.includes("/75x75/") || url.includes("/140x140/") || url.includes("/150x150/") || url.includes("/170x/")) continue;
-      if (url.length < 40) continue;
-      if (!url.match(/\.(jpg|jpeg|png|webp)/i)) continue;
-      // Must be a content image, not a UI element
+      // Skip non-content images
+      if (url.includes("/150x150/") || url.includes("/75x75/") || url.includes("/30x30/") || url.includes("/140x140/") || url.includes("/170x/") || url.includes("/236x/")) continue;
+      if (url.length < 50) continue;
+      // Must be a content-sized image
       if (!url.includes("/originals/") && !url.includes("/736x/") && !url.includes("/564x/") && !url.includes("/474x/")) continue;
+      // Must have image extension
+      if (!url.match(/\.(jpg|jpeg|png|webp)/i)) continue;
+      // Skip UI/icon images
+      if (url.includes("user/") || url.includes("board/") || url.includes("avatar")) continue;
 
       const imageId = getImageId(url);
-      const existing = imageMap.get(imageId);
+      if (!imageId || imageId.length < 10) continue;
 
+      const existing = imageMap.get(imageId);
       if (!existing) {
         imageMap.set(imageId, url);
       } else {
         // Keep higher resolution
-        const existingPriority = sizePriority.findIndex((s) => existing.includes(`/${s}/`));
-        const newPriority = sizePriority.findIndex((s) => url.includes(`/${s}/`));
-        if (newPriority >= 0 && (existingPriority < 0 || newPriority < existingPriority)) {
+        const existingIdx = sizePriority.findIndex((s) => existing.includes(`/${s}/`));
+        const newIdx = sizePriority.findIndex((s) => url.includes(`/${s}/`));
+        if (newIdx >= 0 && (existingIdx < 0 || newIdx < existingIdx)) {
           imageMap.set(imageId, url);
         }
       }
     }
 
-    return Array.from(imageMap.values()).slice(0, 50);
+    return Array.from(imageMap.values());
   } catch (error) {
     console.error("Pinterest scrape error:", error);
     return [];

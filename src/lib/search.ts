@@ -1,32 +1,54 @@
 import type { ProductMatch, UserPreferences } from "@/types";
 
+async function fetchDirectLinks(
+  serpApiKey: string,
+  pageToken: string
+): Promise<{ name: string; link: string; price?: string; logo?: string }[]> {
+  try {
+    const params = new URLSearchParams({
+      api_key: serpApiKey,
+      engine: "google_immersive_product",
+      page_token: pageToken,
+    });
+    const res = await fetch(`https://serpapi.com/search.json?${params}`, {
+      signal: AbortSignal.timeout(8000),
+    });
+    const data = await res.json();
+    const stores = data?.product_results?.stores || [];
+    return stores.map((s: Record<string, string>) => ({
+      name: s.name || "Unknown",
+      link: s.link || "",
+      price: s.price || s.base_price || "",
+      logo: s.logo || "",
+    }));
+  } catch {
+    return [];
+  }
+}
+
 export async function searchProducts(
   query: string,
   preferences?: UserPreferences | null
 ): Promise<ProductMatch[]> {
   const matches: ProductMatch[] = [];
+  const serpApiKey = process.env.SERPAPI_KEY || "";
 
-  // Build enhanced query with preferences
   let enhancedQuery = query;
-  if (preferences) {
-    if (preferences.gender_presentation) {
-      enhancedQuery = `${preferences.gender_presentation} ${enhancedQuery}`;
-    }
+  if (preferences?.gender_presentation) {
+    enhancedQuery = `${preferences.gender_presentation} ${enhancedQuery}`;
   }
 
-  // Try SerpAPI Google Shopping
-  if (process.env.SERPAPI_KEY) {
+  if (serpApiKey) {
     try {
       const params = new URLSearchParams({
-        api_key: process.env.SERPAPI_KEY,
+        api_key: serpApiKey,
         engine: "google_shopping",
         q: enhancedQuery,
-        num: "8",
+        num: "6",
         hl: "en",
         gl: "us",
       });
 
-      // Add price filter based on budget
       if (preferences?.budget_range) {
         const budgetMap: Record<string, string> = {
           "Budget ($0-50)": "0,50",
@@ -36,43 +58,70 @@ export async function searchProducts(
         };
         const range = budgetMap[preferences.budget_range];
         if (range) {
-          params.set("tbs", `mr:1,price:1,ppr_min:${range.split(",")[0]},ppr_max:${range.split(",")[1] || ""}`);
+          const [min, max] = range.split(",");
+          params.set("tbs", `mr:1,price:1,ppr_min:${min}${max ? `,ppr_max:${max}` : ""}`);
         }
       }
 
       const res = await fetch(`https://serpapi.com/search.json?${params}`);
       const data = await res.json();
-
       const results = data.shopping_results || [];
-      for (const r of results.slice(0, 6)) {
-        // product_link goes to Google Shopping product page (which has "buy" buttons to retailers)
-        // If no product_link, construct a Google Shopping search URL
-        const productUrl = r.product_link
-          || `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(r.title || query)}`;
 
-        matches.push({
-          id: `match_${Date.now()}_${Math.random().toString(36).slice(2)}`,
-          detected_product_id: "",
-          product_name: r.title || "Unknown Product",
-          brand: r.source || "Unknown",
-          price: r.extracted_price || parsePrice(r.price) || 0,
-          currency: "USD",
-          product_url: productUrl,
-          image_url: r.thumbnail || "",
-          retailer: r.source || "Unknown",
-          similarity_score: r.rating ? r.rating / 5 : 0.8,
-          in_stock: true,
-          size_available: true,
-        });
+      // For the first 3 results, try to get direct retailer links
+      for (let i = 0; i < Math.min(results.length, 6); i++) {
+        const r = results[i];
+        const token = r.immersive_product_page_token;
+
+        let directStores: { name: string; link: string; price?: string; logo?: string }[] = [];
+
+        // Only fetch direct links for first 2 products (to save API calls)
+        if (token && i < 2) {
+          directStores = await fetchDirectLinks(serpApiKey, token);
+        }
+
+        if (directStores.length > 0) {
+          // Add each retailer as a separate match with direct link
+          for (const store of directStores.slice(0, 3)) {
+            matches.push({
+              id: `match_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+              detected_product_id: "",
+              product_name: r.title || "Unknown Product",
+              brand: store.name,
+              price: r.extracted_price || parsePrice(r.price) || parsePrice(store.price) || 0,
+              currency: "USD",
+              product_url: store.link, // DIRECT retailer link
+              image_url: r.thumbnail || "",
+              retailer: store.name,
+              similarity_score: r.rating ? r.rating / 5 : 0.85,
+              in_stock: true,
+              size_available: true,
+            });
+          }
+        } else {
+          // Fallback: use Google Shopping product page
+          matches.push({
+            id: `match_${Date.now()}_${Math.random().toString(36).slice(2)}`,
+            detected_product_id: "",
+            product_name: r.title || "Unknown Product",
+            brand: r.source || "Unknown",
+            price: r.extracted_price || parsePrice(r.price) || 0,
+            currency: "USD",
+            product_url: r.product_link || `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(r.title || query)}`,
+            image_url: r.thumbnail || "",
+            retailer: r.source || "Unknown",
+            similarity_score: r.rating ? r.rating / 5 : 0.8,
+            in_stock: true,
+            size_available: true,
+          });
+        }
       }
     } catch (err) {
       console.error("SerpAPI search failed:", err);
     }
   }
 
-  // Fallback: direct Google Shopping search links
+  // Fallback
   if (matches.length === 0) {
-    const googleShopUrl = `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(enhancedQuery)}`;
     matches.push({
       id: `match_${Date.now()}_fallback`,
       detected_product_id: "",
@@ -80,7 +129,7 @@ export async function searchProducts(
       brand: "Google Shopping",
       price: 0,
       currency: "USD",
-      product_url: googleShopUrl,
+      product_url: `https://www.google.com/search?tbm=shop&q=${encodeURIComponent(enhancedQuery)}`,
       image_url: "",
       retailer: "Google Shopping",
       similarity_score: 0.5,
@@ -89,16 +138,11 @@ export async function searchProducts(
     });
   }
 
-  // Filter by preferences
+  // Filter excluded brands
   if (preferences) {
-    return matches.filter((m) => {
-      if (preferences.excluded_brands.some((b) =>
-        m.brand.toLowerCase().includes(b.toLowerCase())
-      )) {
-        return false;
-      }
-      return true;
-    });
+    return matches.filter((m) =>
+      !preferences.excluded_brands.some((b) => m.brand.toLowerCase().includes(b.toLowerCase()))
+    );
   }
 
   return matches;

@@ -52,6 +52,7 @@ export default function Home() {
   const [state, setState] = useState<AppState>("landing");
   const [boardUrl, setBoardUrl] = useState("");
   const [pins, setPins] = useState<PinData[]>([]);
+  const [failedImages, setFailedImages] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [error, setError] = useState("");
@@ -421,7 +422,7 @@ export default function Home() {
         <div className="flex-1">
           <h2 className="text-lg font-bold text-gray-900 mb-4">Your Pins</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-            {pins.map((pin) => (
+            {pins.filter((pin) => !failedImages.has(pin.id)).map((pin) => (
               <div
                 key={pin.id}
                 onClick={() => handleAnalyzePin(pin)}
@@ -432,8 +433,8 @@ export default function Home() {
                 <img
                   src={pin.image_url}
                   alt="Pin"
-                  className="w-full aspect-[3/4] object-cover"
-                  onError={(e) => { (e.target as HTMLImageElement).closest('div')!.style.display = 'none'; }}
+                  className="w-full aspect-[3/4] object-cover bg-gray-100"
+                  onError={() => setFailedImages((prev) => new Set(prev).add(pin.id))}
                 />
                 {pin.analyzed && (
                   <div className="absolute top-2 right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
