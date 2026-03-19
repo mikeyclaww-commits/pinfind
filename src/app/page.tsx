@@ -18,7 +18,8 @@ interface DetectedProduct {
   gender_presentation: string;
   search_query: string;
   confidence: number;
-  // Approximate position on image (0-100 percentage)
+  // Position on image (0-100 percentage from GPT-4o)
+  position_x?: number;
   position_y?: number;
 }
 
@@ -53,23 +54,32 @@ interface Preferences {
   excluded_brands: string[];
 }
 
-// Category to approximate vertical position on a person (percentage from top)
-const CATEGORY_POSITIONS: Record<string, number> = {
-  "accessories": 10, "jewelry": 12, "hats": 5,
-  "tops": 30, "outerwear": 28,
-  "dresses": 45,
-  "bags": 50,
-  "bottoms": 60,
-  "shoes": 85, "sneakers": 85,
-  "swimwear": 45, "activewear": 40,
+// Fallback positions by category if GPT-4o doesn't return coordinates
+const CATEGORY_FALLBACK: Record<string, { x: number; y: number }> = {
+  "accessories": { x: 50, y: 10 }, "jewelry": { x: 45, y: 15 }, "hats": { x: 50, y: 5 },
+  "tops": { x: 50, y: 30 }, "outerwear": { x: 50, y: 28 },
+  "dresses": { x: 50, y: 45 },
+  "bags": { x: 30, y: 55 },
+  "bottoms": { x: 50, y: 62 },
+  "shoes": { x: 50, y: 88 }, "sneakers": { x: 50, y: 88 },
+  "swimwear": { x: 50, y: 45 }, "activewear": { x: 50, y: 40 },
 };
 
-function getProductPosition(product: DetectedProduct, index: number, total: number): number {
-  if (product.position_y) return product.position_y;
-  const catPos = CATEGORY_POSITIONS[product.category.toLowerCase()];
-  if (catPos) return catPos;
-  // Distribute evenly if unknown
-  return 15 + (index / Math.max(total - 1, 1)) * 70;
+function getProductXY(product: DetectedProduct, index: number, total: number): { x: number; y: number } {
+  // Use GPT-4o provided positions if available
+  if (product.position_x !== undefined && product.position_y !== undefined &&
+      product.position_x > 0 && product.position_y > 0) {
+    return { x: product.position_x, y: product.position_y };
+  }
+  const fallback = CATEGORY_FALLBACK[product.category.toLowerCase()];
+  if (fallback) return fallback;
+  return { x: 40, y: 15 + (index / Math.max(total - 1, 1)) * 70 };
+}
+
+// Cache for analysis results
+interface AnalysisCache {
+  products: DetectedProduct[];
+  matches: { [key: string]: ProductMatch[] };
 }
 
 // Colors for product tags
@@ -95,6 +105,7 @@ export default function Home() {
   const [matches, setMatches] = useState<{ [key: string]: ProductMatch[] }>({});
   const [activeProductId, setActiveProductId] = useState<string | null>(null);
   const [showAnalysis, setShowAnalysis] = useState(false);
+  const [analysisCache, setAnalysisCache] = useState<Map<string, AnalysisCache>>(new Map());
   const imageRef = useRef<HTMLDivElement>(null);
   const [preferences, setPreferences] = useState<Preferences>({
     gender_presentation: "Women's",
@@ -128,10 +139,20 @@ export default function Home() {
   const handleAnalyzePin = async (pin: PinData) => {
     setSelectedPin(pin);
     setShowAnalysis(true);
+    setActiveProductId(null);
+
+    // Check cache first
+    const cached = analysisCache.get(pin.id);
+    if (cached) {
+      setProducts(cached.products);
+      setMatches(cached.matches);
+      setAnalyzing(false);
+      return;
+    }
+
     setAnalyzing(true);
     setProducts([]);
     setMatches({});
-    setActiveProductId(null);
     try {
       const res = await fetch("/api/analyze", {
         method: "POST",
@@ -143,6 +164,12 @@ export default function Home() {
         setProducts(data.products);
         setMatches(data.matches || {});
         pin.analyzed = true;
+        // Store in cache
+        setAnalysisCache((prev) => {
+          const next = new Map(prev);
+          next.set(pin.id, { products: data.products, matches: data.matches || {} });
+          return next;
+        });
       }
     } catch { setError("Analysis failed"); }
     finally { setAnalyzing(false); }
@@ -413,50 +440,87 @@ export default function Home() {
                   </div>
                 )}
 
-                {/* Product tag overlays */}
+                {/* Hotspot dots on products */}
                 {!analyzing && products.map((product, i) => {
                   const color = TAG_COLORS[i % TAG_COLORS.length];
-                  const yPos = getProductPosition(product, i, products.length);
+                  const pos = getProductXY(product, i, products.length);
                   const isActive = activeProductId === product.id;
 
                   return (
                     <button
-                      key={product.id}
+                      key={`dot-${product.id}`}
                       onClick={() => setActiveProductId(isActive ? null : product.id)}
-                      className={`absolute left-3 transform -translate-y-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-xs font-semibold shadow-lg transition-all duration-200 cursor-pointer ${
-                        isActive ? "scale-110 ring-2 ring-white shadow-xl z-10" : "hover:scale-105 z-5"
+                      className={`absolute transform -translate-x-1/2 -translate-y-1/2 transition-all duration-200 cursor-pointer z-10 ${
+                        isActive ? "scale-125" : "hover:scale-110"
                       }`}
-                      style={{
-                        top: `${yPos}%`,
-                        backgroundColor: isActive ? undefined : undefined,
-                      }}
+                      style={{ left: `${pos.x}%`, top: `${pos.y}%` }}
                     >
-                      <div className={`absolute inset-0 rounded-full ${color.bg} ${isActive ? "opacity-100" : "opacity-90"}`} />
-                      <span className="relative flex items-center gap-1.5">
-                        <span className="w-2 h-2 bg-white rounded-full" />
-                        {product.subcategory}
-                        <ChevronDown className={`h-3 w-3 transition-transform ${isActive ? "rotate-180" : ""}`} />
-                      </span>
+                      {/* Pulsing ring */}
+                      <div className={`absolute inset-0 rounded-full ${color.bg} animate-ping opacity-30`} style={{ width: 28, height: 28, margin: -6 }} />
+                      {/* Dot */}
+                      <div className={`w-4 h-4 rounded-full ${color.bg} border-2 border-white shadow-lg`} />
                     </button>
                   );
                 })}
 
-                {/* Connection lines from tags to right edge */}
+                {/* Label + line for active product */}
                 {!analyzing && products.map((product, i) => {
                   const color = TAG_COLORS[i % TAG_COLORS.length];
-                  const yPos = getProductPosition(product, i, products.length);
+                  const pos = getProductXY(product, i, products.length);
                   const isActive = activeProductId === product.id;
                   if (!isActive) return null;
 
+                  // Line goes from the dot to the right edge
                   return (
-                    <svg key={`line-${product.id}`} className="absolute inset-0 w-full h-full pointer-events-none z-0" preserveAspectRatio="none">
-                      <line
-                        x1="50%" y1={`${yPos}%`} x2="100%" y2={`${yPos}%`}
-                        className={`${color.text}`}
-                        stroke="currentColor" strokeWidth="2" strokeDasharray="6,4" opacity="0.6"
-                      />
-                      <circle cx="100%" cy={`${yPos}%`} r="4" fill="currentColor" className={color.text} opacity="0.8" />
-                    </svg>
+                    <div key={`label-${product.id}`}>
+                      {/* SVG line from dot to right edge */}
+                      <svg className="absolute inset-0 w-full h-full pointer-events-none z-5">
+                        <line
+                          x1={`${pos.x}%`} y1={`${pos.y}%`}
+                          x2="100%" y2={`${pos.y}%`}
+                          stroke="white" strokeWidth="2" strokeDasharray="6,4" opacity="0.8"
+                        />
+                        <circle cx={`${pos.x}%`} cy={`${pos.y}%`} r="6" fill="white" opacity="0.9" />
+                      </svg>
+                      {/* Label positioned near the dot */}
+                      <div
+                        className="absolute z-20 pointer-events-none"
+                        style={{
+                          left: `${Math.min(pos.x + 3, 65)}%`,
+                          top: `${pos.y}%`,
+                          transform: "translateY(-50%)",
+                        }}
+                      >
+                        <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-white text-xs font-semibold shadow-xl ${color.bg}`}>
+                          <span className="capitalize">{product.subcategory}</span>
+                          <ArrowRight className="h-3 w-3" />
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {/* Non-active product labels (smaller) */}
+                {!analyzing && products.map((product, i) => {
+                  const color = TAG_COLORS[i % TAG_COLORS.length];
+                  const pos = getProductXY(product, i, products.length);
+                  const isActive = activeProductId === product.id;
+                  if (isActive || activeProductId !== null) return null;
+
+                  return (
+                    <div
+                      key={`minilabel-${product.id}`}
+                      className="absolute z-10 pointer-events-none"
+                      style={{
+                        left: `${Math.min(pos.x + 2, 70)}%`,
+                        top: `${pos.y}%`,
+                        transform: "translateY(-50%)",
+                      }}
+                    >
+                      <div className={`px-2 py-1 rounded-full text-white text-[10px] font-semibold shadow-lg ${color.bg} opacity-90`}>
+                        {product.subcategory}
+                      </div>
+                    </div>
                   );
                 })}
               </div>

@@ -18,8 +18,12 @@ For each product, return a JSON array. Each item must have:
   "brand_guess": "brand name if visible or recognizable, null otherwise",
   "gender_presentation": "Women's|Men's|Unisex",
   "search_query": "optimized Google Shopping search query to find this exact item",
-  "confidence": 0.0-1.0
+  "confidence": 0.0-1.0,
+  "position_x": 0-100,
+  "position_y": 0-100
 }
+
+IMPORTANT: position_x and position_y represent where the CENTER of this product is located in the image, as a percentage (0-100). 0,0 is the top-left corner, 100,100 is the bottom-right corner. Be accurate — if a hat is at the top of the image, position_y should be around 10-15. If shoes are at the bottom, position_y should be around 85-95. If something is on the left side, position_x should be 20-40. Right side would be 60-80.
 
 Be specific and detailed. The search_query should be precise enough to find similar products online. Return ONLY a valid JSON array, no markdown.`;
 
@@ -34,7 +38,7 @@ export async function analyzeImage(imageUrl: string): Promise<DetectedProduct[]>
         {
           role: "user",
           content: [
-            { type: "text", text: "Identify all fashion products in this image." },
+            { type: "text", text: "Identify all fashion products in this image. Be precise about position_x and position_y for each product." },
             { type: "image_url", image_url: { url: imageUrl, detail: "high" } },
           ],
         },
