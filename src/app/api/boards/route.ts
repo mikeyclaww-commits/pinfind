@@ -1,9 +1,14 @@
 import { NextResponse } from "next/server";
 
-// Scrape pins from a public Pinterest board URL
+// Extract the unique image identifier from a pinimg URL
+// e.g., "https://i.pinimg.com/736x/ab/cd/ef/abcdef123.jpg" → "ab/cd/ef/abcdef123.jpg"
+function getImageId(url: string): string {
+  const match = url.match(/\/(?:originals|736x|564x|474x|236x|170x|150x150)\/(.+)/);
+  return match ? match[1] : url;
+}
+
 async function scrapePinterestBoard(boardUrl: string) {
   try {
-    // Fetch the board page
     const res = await fetch(boardUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -13,43 +18,51 @@ async function scrapePinterestBoard(boardUrl: string) {
 
     const html = await res.text();
 
-    // Extract image URLs from the page
-    const imageUrls: string[] = [];
-
-    // Look for pin images in the HTML (Pinterest embeds image URLs in various formats)
-    const imgRegex = /https:\/\/i\.pinimg\.com\/[^\s"']+/g;
+    // Collect ALL pinimg URLs
+    const allUrls: string[] = [];
+    const imgRegex = /https:\/\/i\.pinimg\.com\/[^\s"'\\]+/g;
     const matches = html.match(imgRegex) || [];
-
     for (const url of matches) {
-      // Only get reasonably sized images (skip tiny thumbnails)
-      if (url.includes("/736x/") || url.includes("/564x/") || url.includes("/originals/")) {
-        if (!imageUrls.includes(url)) {
-          imageUrls.push(url);
+      const clean = url.replace(/\\u002F/g, "/").replace(/\\/g, "");
+      allUrls.push(clean);
+    }
+
+    // Also extract from JSON data
+    const jsonRegex = /"url":\s*"(https:\/\/i\.pinimg\.com\/[^"]+)"/g;
+    let match;
+    while ((match = jsonRegex.exec(html)) !== null) {
+      const clean = match[1].replace(/\\u002F/g, "/").replace(/\\/g, "");
+      allUrls.push(clean);
+    }
+
+    // Deduplicate by image ID — keep the highest resolution version
+    const imageMap = new Map<string, string>();
+    const sizePriority = ["originals", "736x", "564x", "474x", "236x"];
+
+    for (const url of allUrls) {
+      // Skip tiny images, profile pics, icons
+      if (url.includes("/30x30/") || url.includes("/75x75/") || url.includes("/140x140/") || url.includes("/150x150/") || url.includes("/170x/")) continue;
+      if (url.length < 40) continue;
+      if (!url.match(/\.(jpg|jpeg|png|webp)/i)) continue;
+      // Must be a content image, not a UI element
+      if (!url.includes("/originals/") && !url.includes("/736x/") && !url.includes("/564x/") && !url.includes("/474x/")) continue;
+
+      const imageId = getImageId(url);
+      const existing = imageMap.get(imageId);
+
+      if (!existing) {
+        imageMap.set(imageId, url);
+      } else {
+        // Keep higher resolution
+        const existingPriority = sizePriority.findIndex((s) => existing.includes(`/${s}/`));
+        const newPriority = sizePriority.findIndex((s) => url.includes(`/${s}/`));
+        if (newPriority >= 0 && (existingPriority < 0 || newPriority < existingPriority)) {
+          imageMap.set(imageId, url);
         }
       }
     }
 
-    // Also try to extract from JSON data embedded in the page
-    const jsonRegex = /"images":\s*\{[^}]*"orig":\s*\{[^}]*"url":\s*"([^"]+)"/g;
-    let match;
-    while ((match = jsonRegex.exec(html)) !== null) {
-      if (!imageUrls.includes(match[1])) {
-        imageUrls.push(match[1]);
-      }
-    }
-
-    // Filter out invalid/broken URLs
-    const validUrls = imageUrls.filter((url) => {
-      // Must be a full URL with proper path
-      if (url.length < 30) return false;
-      // Skip tiny images and profile pics
-      if (url.includes("/30x30/") || url.includes("/75x75/") || url.includes("/140x140/") || url.includes("/150x150/")) return false;
-      // Must end with an image extension or have proper pinimg path
-      if (!url.match(/\.(jpg|jpeg|png|webp)$/i) && !url.includes("/736x/") && !url.includes("/564x/") && !url.includes("/originals/")) return false;
-      return true;
-    });
-
-    return validUrls.slice(0, 50); // Limit to 50 pins for MVP
+    return Array.from(imageMap.values()).slice(0, 50);
   } catch (error) {
     console.error("Pinterest scrape error:", error);
     return [];

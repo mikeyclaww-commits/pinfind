@@ -460,16 +460,29 @@ export default function Home() {
             </div>
           )}
 
-          {analyzing && (
-            <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-              <Loader2 className="h-10 w-10 text-red-500 animate-spin mx-auto mb-3" />
-              <h3 className="font-bold text-gray-700 mb-1">Analyzing pin...</h3>
-              <p className="text-gray-400 text-sm">Identifying products and searching retailers</p>
+          {analyzing && selectedPin && (
+            <div className="space-y-4">
+              {/* Selected pin preview */}
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <img src={selectedPin.image_url} alt="Selected pin" className="w-full max-h-72 object-cover" />
+                <div className="p-4 text-center">
+                  <div className="flex items-center justify-center gap-2 text-red-500">
+                    <Loader2 className="h-5 w-5 animate-spin" />
+                    <span className="font-semibold text-sm">Analyzing this pin...</span>
+                  </div>
+                  <p className="text-gray-400 text-xs mt-1">Identifying products and searching retailers</p>
+                </div>
+              </div>
             </div>
           )}
 
           {selectedPin && !analyzing && products.length > 0 && (
             <div className="space-y-4">
+              {/* Selected pin preview */}
+              <div className="bg-white rounded-xl border-2 border-red-200 overflow-hidden">
+                <img src={selectedPin.image_url} alt="Selected pin" className="w-full max-h-64 object-cover" />
+              </div>
+
               <div className="flex items-center justify-between">
                 <h3 className="font-bold text-gray-900">{products.length} Products Found</h3>
                 <button onClick={() => { setSelectedPin(null); setProducts([]); }} className="text-gray-400 hover:text-gray-600">
@@ -536,10 +549,15 @@ export default function Home() {
           )}
 
           {selectedPin && !analyzing && products.length === 0 && (
-            <div className="bg-white rounded-xl border border-gray-200 p-8 text-center">
-              <ShoppingBag className="h-12 w-12 text-gray-300 mx-auto mb-3" />
-              <h3 className="font-bold text-gray-700 mb-1">No products detected</h3>
-              <p className="text-gray-400 text-sm">This pin might not contain fashion items, or try a different pin.</p>
+            <div className="space-y-4">
+              <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
+                <img src={selectedPin.image_url} alt="Selected pin" className="w-full max-h-64 object-cover" />
+              </div>
+              <div className="bg-white rounded-xl border border-gray-200 p-6 text-center">
+                <ShoppingBag className="h-10 w-10 text-gray-300 mx-auto mb-2" />
+                <h3 className="font-bold text-gray-700 mb-1">No products detected</h3>
+                <p className="text-gray-400 text-sm">This pin might not contain fashion items, or try a different pin.</p>
+              </div>
             </div>
           )}
         </div>
