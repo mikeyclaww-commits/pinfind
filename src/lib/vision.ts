@@ -1,7 +1,9 @@
 import OpenAI from "openai";
 import type { DetectedProduct } from "@/types";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+function getOpenAI() {
+  return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || "placeholder" });
+}
 
 const VISION_SYSTEM_PROMPT = `You are a fashion product identification AI. Analyze the image and identify EVERY visible fashion product (clothing, shoes, bags, accessories, jewelry).
 
@@ -23,6 +25,7 @@ Be specific and detailed. The search_query should be precise enough to find simi
 
 export async function analyzeImage(imageUrl: string): Promise<DetectedProduct[]> {
   try {
+    const openai = getOpenAI();
     const response = await openai.chat.completions.create({
       model: "gpt-4o",
       max_tokens: 2000,
