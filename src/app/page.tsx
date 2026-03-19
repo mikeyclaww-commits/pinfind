@@ -429,7 +429,12 @@ export default function Home() {
                   selectedPin?.id === pin.id ? "border-red-500 ring-2 ring-red-200" : "border-transparent hover:border-gray-300"
                 }`}
               >
-                <img src={pin.image_url} alt="Pin" className="w-full aspect-[3/4] object-cover" />
+                <img
+                  src={pin.image_url}
+                  alt="Pin"
+                  className="w-full aspect-[3/4] object-cover"
+                  onError={(e) => { (e.target as HTMLImageElement).closest('div')!.style.display = 'none'; }}
+                />
                 {pin.analyzed && (
                   <div className="absolute top-2 right-2 w-6 h-6 bg-green-500 rounded-full flex items-center justify-center">
                     <Check className="h-4 w-4 text-white" />

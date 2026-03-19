@@ -38,7 +38,18 @@ async function scrapePinterestBoard(boardUrl: string) {
       }
     }
 
-    return imageUrls.slice(0, 50); // Limit to 50 pins for MVP
+    // Filter out invalid/broken URLs
+    const validUrls = imageUrls.filter((url) => {
+      // Must be a full URL with proper path
+      if (url.length < 30) return false;
+      // Skip tiny images and profile pics
+      if (url.includes("/30x30/") || url.includes("/75x75/") || url.includes("/140x140/") || url.includes("/150x150/")) return false;
+      // Must end with an image extension or have proper pinimg path
+      if (!url.match(/\.(jpg|jpeg|png|webp)$/i) && !url.includes("/736x/") && !url.includes("/564x/") && !url.includes("/originals/")) return false;
+      return true;
+    });
+
+    return validUrls.slice(0, 50); // Limit to 50 pins for MVP
   } catch (error) {
     console.error("Pinterest scrape error:", error);
     return [];
